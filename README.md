@@ -6,7 +6,7 @@
 
 上游 `station_gaps_202611.csv` 为3测站、480小时的1440条模拟观测。团队原来跨列手填，长缺口容易过平滑、边缘外推未标、验证时不慎用到被遮挡真值。本工程替代原始核查、遮挡锁定、固定参数重建、误差复核与归档，下游观测组据此安排实际质控讨论。
 
-ObservationDataset原始观测、GapMask连续验证掩码、ReconstructionStudy参数方案、ReconstructionRun运行、GapReview复核、Report报告，全部贯穿存储/API/界面。六页：缺测档案、原始观测、连续遮挡、重建参数、插补与验证、缺口复核。总览和结果共用GapChart与GapSummary。
+ObservationDataset原始观测、GapMask连续验证掩码、ReconstructionStudy参数方案、ReconstructionRun运行、GapReview复核、Report报告，全部贯穿存储/API/界面。六页：缺测档案、原始观测、连续遮挡、重建参数、插补与验证、缺口复核；另设第七页「接收与预警」承载逐站在线读数流。总览和结果共用GapChart与GapSummary。
 
 ## 快速启动
 
@@ -65,6 +65,22 @@ RTS使用未来已观测值，自动初值也可能位于序列起点之后，�
 
 两方法公平MAE只在双方均可估的共有内点上计算；同时公开target_count、各自可估数量和独立MAE。PCHIP边缘目标不可估时common_count可为0，共有MAE返回null，RTS自身计数和误差另列。原始未知值从不进验证分母。
 
+## 逐站读数接收与在线预警
+
+第七页「接收与预警」与离线重建完全分开：读数 POST `/streams/ingest` 接收后立即给出该站单侧补值与区间，POST `/streams/preview` 用同一管线试算但不落库、不通知。站点流状态存 `streams` 表（以测站 ID 为主键，与六实体同库不同表）。
+
+1. **只用当时已到的数据。** 每条读数的补值/区间只由该时刻及之前已受理的读数给出：单侧 Kalman 预测 m⁻、P⁻，缺失时仅预测；Y 是观测时才更新。不使用 RTS、不使用未来观测，因此追加未来读数不会改变任何历史补值或通知。
+2. **首条实测前不可估。** 站点还没有任何实测值时，所有补值、状态区间与观测区间输出 `null` 并标 `estimate_status=unestimable`；首条实测到达后也不回填更早时点。
+3. **按实际时间累计缺测。** 空值读数是「该时刻确认没有观测」，按读数时刻之差 Δt 累计缺测时长；随时可查 `missing_hours_total`。首条实测前的缺测同样计时，但补值仍不可估。
+4. **超限与恢复各一次。** 缺测时长达到阈值（默认 12h，可按批次传入并在该站首条读数时固定）产生一条 `gap_alert`；该次缺测结束回到实测时产生一条 `gap_recovered`。同一次缺测不会重复通知；阈值内的小缺口不通知。预警发生在缺口结束之前时，会在同一批里先出 alert 再出 recover，二者成对。
+5. **每条通知可追查依据。** `GET /streams/{station}/notifications/{id}` 返回触发时的快照：阈值、缺口起止、期间逐条读数与补值/区间、触发前/后滤波状态（m、P）、触发读数、参数与批次摘要。快照写入后不再改动。
+6. **重放不重复。** 同站同参数、完全相同的读数批次返回 201 和原回执（`replayed: true`），不重复推进状态，也不重复通知。批次摘要对该站全部读数生效。
+7. **并发按时刻推进。** 同一站的并发请求由站点锁（进程内锁 + PostgreSQL advisory lock）串行化，先到先推进；同一批内的全部读数（含跨站）按实际时刻严格递增逐条推进。
+8. **迟到整批拒绝。** 批次中任一站出现不晚于该站已受理游标的读数，返回 409，整批不写入、通知不产生、原状态不变。
+9. **失败重试等价。** 接收先纯函数计算、再单事务 `put_many` 落库；中途失败不留半成品，重试后的滤波状态、缺测时长与通知内容与一次成功处理相同（通知 ID 由站点/缺口序号/触发时刻派生）。
+
+边界：在线补值是单侧预测，缺口越长方差越大、越不能替代质控；阈值与 q/r 固定配置，不从数据自动学习。离线 RTS/PCHIP 页继续使用未来观测，产品始终明确标注为离线重建。
+
 ## 技术与结构
 
 | 层 | 技术 |
@@ -73,8 +89,9 @@ RTS使用未来已观测值，自动初值也可能位于序列起点之后，�
 | 后端 | Python3.12 / FastAPI / psycopg3 |
 | 算法 | Python math/bisect，Kalman/RTS和PCHIP自实现 |
 | 异步与持久化 | Redis7.4 / 独立worker / PostgreSQL16 |
+| 在线接收 | 进程内站点锁 + PostgreSQL advisory lock / 单事务批写入 |
 
-78职责源文件。后端src/{routes,controllers,services,models,schemas,middlewares,utils,constants,config}，前端src/{api,stores,types,components/common,hooks,pages,router,utils,constants}。TEXT主键+JSON文本业务表，DDL在backend/migrations/001_initial.sql；advisory lock保护首次并发建表。
+83职责源文件。后端src/{routes,controllers,services,models,schemas,middlewares,utils,constants,config}，前端src/{api,stores,types,components/common,hooks,pages,router,utils,constants}。TEXT主键+JSON文本业务表，DDL在backend/migrations/001_initial.sql；advisory lock保护首次并发建表。
 
 枚举：后端src/constants/enums.py角色/状态及src/constants/domain.py配额/区间常数；前端src/constants/enums.ts。环境DATABASE_URL、REDIS_URL、JWT_SECRET、SEED_DEMO、TASK_MODE、ARTIFACT_DIR及端口/口令见.env.example。
 

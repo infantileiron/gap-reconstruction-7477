@@ -37,3 +37,16 @@ class ReportInput(InputModel):
  run_id:str
  review_id:str
  title:str=Field(min_length=2,max_length=100)
+class ReadingInput(InputModel):
+ station:str=Field(min_length=1,max_length=30)
+ time_hour:float=Field(ge=0,le=10000000)
+ value:float|None=Field(default=None,ge=-1000000,le=1000000)
+class StreamConfigInput(InputModel):
+ q_per_hour:float|None=Field(default=None,gt=0,le=100)
+ observation_r:float|None=Field(default=None,gt=0,le=100)
+ initial_variance:float|None=Field(default=None,gt=0,le=100000000)
+ initial_level:float|None=Field(default=None,ge=-1000000,le=1000000)
+ gap_threshold_hours:float|None=Field(default=None,gt=0,le=100000)
+class IngestInput(StreamConfigInput):
+ readings:list[ReadingInput]|None=Field(default=None,min_length=1,max_length=2000)
+ text:str|None=Field(default=None,max_length=1800000)

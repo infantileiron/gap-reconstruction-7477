@@ -8,3 +8,15 @@ export type Result={station:string;point_count:number;observed_count:number;miss
 export type Run={id:string;study_id:string;status:string;result:Result;error:string};
 export type Review={id:string;run_id:string;comment:string;status:string;reviewer:string};
 export type Report={id:string;run_id:string;review_id:string;title:string};
+
+export type StreamConfig={q_per_hour:number;observation_r:number;initial_variance:number;initial_level:number|null;gap_threshold_hours:number};
+export type StreamPoint={time_hour:number;value:number|null;is_observation:boolean;estimate_status:'estimable'|'unestimable';mean:number|null;state_variance:number|null;observation_variance:number|null;state_low:number|null;state_high:number|null;observation_low:number|null;observation_high:number|null;fill_value:number|null;reason?:string;received_at:string;batch_digest:string};
+export type NotificationBasisPoint={time_hour:number;value:number|null;estimate_status:string;mean:number|null;state_low:number|null;state_high:number|null;observation_low:number|null;observation_high:number|null};
+export type NotificationBasis={station:string;threshold_hours:number;duration_hours:number;gap_started_at:number|null;triggered_at:number;gap_readings:NotificationBasisPoint[];filter_before:{time_hour:number;mean:number;variance:number}|null;filter_at_trigger?:{time_hour:number;mean:number;variance:number}|null;filter_after?:{time_hour:number;mean:number;variance:number}|null;config:StreamConfig;batch_digest:string;batch_received_at?:string;alert_id?:string;explanation:string};
+export type StreamNotification={id:string;kind:'gap_alert'|'gap_recovered';station:string;duration_hours:number;created_at:string;basis:NotificationBasis};
+export type StreamBatch={batch_digest:string;received_at:string;count:number;first_time:number;last_time:number;stations:StreamStationReceipt[]};
+export type StreamStationReceipt={station:string;cursor:number|null;points_added:number;estimable_added:number;unestimable_added:number;notifications:{id:string;kind:string;duration_hours:number}[];gap_active:boolean;missing_hours_total:number;batch_digest:string};
+export type StreamReceipt={batch_digest:string;replayed:boolean;received_at:string;window:{first_time:number;last_time:number};count:number;stations:StreamStationReceipt[]};
+export type StreamMissing={active:boolean;started_at:number|null;completed_hours:number;current_hours:number;total_hours:number;alerted:boolean;alert_id:string|null;gap_index:number;readings:StreamPoint[]};
+export type StreamSummary={station:string;config:StreamConfig;cursor:number|null;gap_active:boolean;gap_started_at:number|null;current_gap_hours:number;missing_hours_total:number;alerted:boolean;counters:{readings:number;estimable:number;unestimable:number;alerts:number;recoveries:number};filter:{time_hour:number;mean:number;variance:number}|null;updated_at:string};
+export type StreamDetail=StreamSummary&{missing:StreamMissing;readings:StreamPoint[];notifications:StreamNotification[];batches:StreamBatch[]};
